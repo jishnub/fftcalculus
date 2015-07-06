@@ -119,25 +119,23 @@ cpdef integrate(np.ndarray arr,int axis=-1,period=2*np.pi):
         if arr.dtype!=complex: arr=arr*1.0
         return integrate_complex(arr,axis,float(period))
 
-cpdef differentiate(np.ndarray arr,int axis=-1,double period=2*np.pi):   
+cpdef differentiate(np.ndarray arr,int axis=-1,double period=2*np.pi,discontinuity=None):   
     if np.isreal(arr).all():
         arr=arr.real
         if arr.dtype!=float: arr=arr*1.0
-        return differentiate_real(arr,axis,float(period))
+        return differentiate_real(arr,axis,float(period),discontinuity=discontinuity)
     else:
         if arr.dtype!=complex: arr=arr*1.0
-        return differentiate_complex(arr,axis,float(period))
+        return differentiate_complex(arr,axis,float(period),discontinuity=discontinuity)
     
-cpdef differentiate_real(np.ndarray arr,int axis=-1,double period=2*np.pi,discontinuous=False,double discontinuity=0):
+cpdef differentiate_real(np.ndarray arr,int axis=-1,double period=2*np.pi,discontinuity=None):
     
-    if arr.ndim==1: return differentiate_real_1D(arr,period=float(period),discontinuity=discontinuity)
-    elif arr.ndim==2: return differentiate_real_2D(arr,axis=axis,period=float(period),discontinuity=discontinuity)
+    if arr.ndim==1: return differentiate_real_1D(arr,period=period,discontinuity=discontinuity)
+    elif arr.ndim==2: return differentiate_real_2D(arr,axis=axis,period=period,discontinuity=discontinuity)
 
-    cdef int i,N,Nk,ndim
+    cdef unsigned int N,Nk,ndim
     cdef np.ndarray arrf,coeff,derivf
-    cdef np.ndarray deriv
-    
-    if not discontinuous: discontinuity=0
+    cdef np.ndarray deriv,slope,x
     
     arr=np.swapaxes(arr,0,axis)
     N=arr.shape[0]
@@ -145,84 +143,137 @@ cpdef differentiate_real(np.ndarray arr,int axis=-1,double period=2*np.pi,discon
     coeff=1j*(2*np.pi)*np.fft.rfftfreq(N,period/N)
     Nk=coeff.shape[0]
     shape=[Nk];shape.extend([1]*(ndim-1));
-    coeff=coeff.reshape(tuple(shape))
+    coeff=coeff.reshape(shape)
+    
+    shape=[1]
+    for dim in xrange(ndim):  shape.extend(arr.shape[dim])
+    
+    if discontinuity is None: discontinuity=np.zeros(shape)
+    else: 
+        if type(discontinuity)==int or type(discontinuity)==float: 
+            discontinuity=np.ones(shape)*discontinuity
+        discontinuity=discontinuity.reshape(shape)
+        
+    slope=discontinuity/period
+    
+    x=np.linspace(0,period,N,endpoint=False)
+    shape=[N];shape.extend([1]*(ndim-1));
+    x=x.reshape(shape)
 
-    arrf=np.fft.rfft(arr-discontinuity,axis=0)
+    arr=arr-x*slope
+
+    arrf=np.fft.rfft(arr,axis=0)
     
     derivf=arrf*coeff
     
     deriv=np.fft.irfft(derivf,axis=0).real
     
+    deriv=deriv+slope
+    
     deriv=np.swapaxes(deriv,0,axis)
     return deriv
 
-cpdef differentiate_real_1D(np.ndarray arr,double period=2*np.pi,discontinuous=False,double discontinuity=0):
+cpdef differentiate_real_1D(np.ndarray[double,ndim=1] arr,double period=2*np.pi,discontinuity=None):
 
-    cdef int i,N,Nk
+    cdef unsigned int N,Nk
     cdef np.ndarray[complex,ndim=1] arrf,coeff,derivf
-    cdef np.ndarray[double,ndim=1] deriv
-    
-    if not discontinuous: discontinuity=0
+    cdef np.ndarray[double,ndim=1] deriv,x
+    cdef double slope
     
     N=arr.shape[0]
     coeff=1j*(2*np.pi)*np.fft.rfftfreq(N,period/N)
     Nk=coeff.shape[0]
-
-    arrf=np.fft.rfft(arr-discontinuity)
     
+    x=np.linspace(0,period,num=N,endpoint=False)
+    
+    if discontinuity is None: discontinuity=0
+    
+    slope=discontinuity/period
+    arr=arr-slope*x
+    
+    arrf=np.fft.rfft(arr)
     derivf=arrf*coeff
-    
     deriv=np.fft.irfft(derivf).real
     
+    deriv=deriv+slope
+    
     return deriv
     
-cpdef differentiate_real_2D(np.ndarray arr,int axis=-1,double period=2*np.pi,discontinuous=False,double discontinuity=0):
+cpdef differentiate_real_2D(np.ndarray[double,ndim=2] arr,int axis=-1,double period=2*np.pi,discontinuity=None):
 
 
-    cdef int i,N,Nk,ndim
-    cdef np.ndarray arrf,coeff,derivf
-    cdef np.ndarray deriv
-    
-    if not discontinuous: discontinuity=0
+    cdef unsigned int N,Nk
+    cdef np.ndarray[complex,ndim=2] arrf,coeff,derivf
+    cdef np.ndarray[double,ndim=2] deriv,slope
+    cdef np.ndarray[double,ndim=2] x
     
     arr=np.swapaxes(arr,0,axis)
-    N=arr.shape[0]
-    ndim=arr.ndim
-    coeff=1j*(2*np.pi)*np.fft.rfftfreq(N,period/N)
-    Nk=coeff.shape[0]
-    shape=[Nk];shape.extend([1]*(ndim-1));
-    coeff=coeff.reshape(tuple(shape))
 
-    arrf=np.fft.rfft(arr-discontinuity,axis=0)
+    N=arr.shape[0]
+    coeff=np.atleast_2d(1j*(2*np.pi)*np.fft.rfftfreq(N,period/N))
+    Nk=coeff.shape[1]
+    coeff=coeff.reshape(Nk,1)
     
+    if discontinuity is None: discontinuity=np.zeros((1,arr.shape[1]))
+    else: 
+        if type(discontinuity)==int or type(discontinuity)==float: 
+            discontinuity=np.ones((1,arr.shape[1]))*discontinuity
+        discontinuity=discontinuity.reshape((1,arr.shape[1]))
+    
+    slope=discontinuity/period
+    
+    
+    x=np.linspace(0,period,N,endpoint=False).reshape(N,1)
+    
+    arr=arr-x*slope
+
+    arrf=np.fft.rfft(arr,axis=0)
     derivf=arrf*coeff
-    
     deriv=np.fft.irfft(derivf,axis=0).real
     
+    deriv=deriv+slope
+    
     deriv=np.swapaxes(deriv,0,axis)
+    
     return deriv
 
-cpdef differentiate_complex(np.ndarray arr,int axis=-1,double period=2*np.pi,discontinuous=False,double discontinuity=0):
+cpdef differentiate_complex(np.ndarray arr,int axis=-1,double period=2*np.pi,discontinuity=None):
 
-    cdef int i,N,Nk,ndim
+    cdef int N,Nk,ndim
     cdef np.ndarray arrf,coeff,derivf
-    cdef np.ndarray deriv
-    
-    if not discontinuous: discontinuity=0
+    cdef np.ndarray deriv,slope,x
     
     arr=np.swapaxes(arr,0,axis)
     N=arr.shape[0]
     ndim=arr.ndim
     coeff=1j*(2*np.pi)*np.fft.fftfreq(N,period/N)
     Nk=coeff.shape[0]
-    shape=[Nk];shape.extend([1]*(ndim-1));shape=tuple(shape)
+    shape=[Nk];shape.extend([1]*(ndim-1))
     coeff=coeff.reshape(shape)
+    
+    shape=[1]
+    for dim in xrange(ndim):  shape.extend(arr.shape[dim])
+    if discontinuity is None: discontinuity=np.zeros(shape)
+    else: 
+        if type(discontinuity)==int or type(discontinuity)==float: 
+            discontinuity=np.ones(shape)*discontinuity
+        discontinuity=discontinuity.reshape(shape)
+    
+    slope=discontinuity/period    
+    
+    x=np.linspace(0,period,N,endpoint=False)
+    shape=[N];shape.extend([1]*(ndim-1))
+    x=x.reshape(shape)
+    
+    arr=arr-x*slope
 
-    arrf=np.fft.fft(arr-discontinuity,axis=0)
+    arrf=np.fft.fft(arr,axis=0)
     
     derivf=arrf*coeff
     
     deriv=np.fft.ifft(derivf,axis=0).real
+    
+    deriv=deriv+slope
     
     deriv=np.swapaxes(deriv,0,axis)
     return deriv
